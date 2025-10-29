@@ -80,27 +80,18 @@ class User extends Authenticatable
     {
         return $this->first_name.' '.$this->last_name;
     }
-
+    
     public function wishlistCount()
     {
         return $this->wishlists()->whereHas('item', function($query) {
-                    $query->where('status', '=', 1);
-                })->count();
+            $query->where('status', '=', 1);
+        })->count();
     }
+    
 
-    // Wallet relationship
-    public function wallet()
-    {
-        return $this->hasOne(\App\Models\Wallet::class, 'user_id');
-    }
+    // existing code...
 
-    // Referrer relationship
-    public function referrer()
-    {
-        return $this->belongsTo(User::class, 'referred_by')->withDefault();
-    }
-
-    /**
+        /**
      * Booted: create referral_code and wallet when a user is created
      */
     protected static function booted()
@@ -118,5 +109,37 @@ class User extends Authenticatable
                 \App\Models\Wallet::create(['user_id' => $user->id, 'balance' => 0]);
             }
         });
+    }
+    
+    // protected static function booted()
+    // {
+    //     static::creating(function ($user) {
+    //         // ensure referral_code is unique and present
+    //         if (empty($user->referral_code)) {
+    //             $user->referral_code = self::generateUniqueReferralCode();
+    //         }
+    //     });
+    // }
+    
+    public static function generateUniqueReferralCode($length = 8)
+    {
+        do {
+            $code = strtoupper('U' . substr(md5(uniqid(rand(), true)), 0, $length));
+        } while (self::where('referral_code', $code)->exists());
+    
+        return $code;
+    }
+    
+    // existing relationships and functions...
+    // Wallet relationship
+    public function wallet()
+    {
+        return $this->hasOne(\App\Models\Wallet::class, 'user_id');
+    }
+
+    // Referrer relationship
+    public function referrer()
+    {
+        return $this->belongsTo(User::class, 'referred_by')->withDefault();
     }
 }

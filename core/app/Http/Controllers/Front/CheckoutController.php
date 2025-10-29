@@ -273,6 +273,10 @@ class CheckoutController extends Controller
 
         $input = $request->all();
 
+        // Ensure referral_code from the checkout form is included in the input so
+        // order creation in traits/repositories receives and saves it.
+        $input['referral_code'] = $request->input('referral_code', null);
+
         $checkout = false;
         $payment_redirect = false;
         $payment = null;
@@ -359,29 +363,6 @@ class CheckoutController extends Controller
         }
 
 
-// --- snippet to add in the checkout() method where you build/create $order ---
-
-// capture referral code from request
-$referralCode = $request->input('referral_code', null);
-
-// when creating the order (example):
-$orderData = [
-    'user_id' => isset($user) ? $user->id : 0,
-    'payment_method' => $input['payment_method'],
-    // ... existing order fields ...
-    'referral_code' => $referralCode,
-    'used_wallet_amount' => 0, // or your logic
-];
-
-// create order
-$order = Order::create($orderData);
-
-// after payment success (for wallet flow you may mark as paid immediately, for gateways only after webhook)
-// when you call your cashback/referral processing, pass the referralCode:
-$cashbackService = app(\App\Services\CashbackService::class);
-$cashbackService->process($order, $referralCode);
-
-// --- end snippet --- 
 
         if ($checkout) {
             if ($payment_redirect) {

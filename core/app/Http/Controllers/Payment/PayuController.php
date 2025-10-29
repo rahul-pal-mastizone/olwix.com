@@ -10,26 +10,15 @@ use App\Helpers\PriceHelper;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use App\Models\Order;
+use App\Services\ReferralService;
 
-/**
- * PayU Controller
- *
- * - Reads DB payment_settings row with unique_keyword = 'payu'
- * - Accepts multiple common key names (merchant_key, key, client_id) and salt names (salt, client_secret)
- * - Computes PayU hash and renders an auto-submit form to PayU
- * - Verifies PayU response hash in notify()
- */
 class PayuController extends Controller
 {
-    /**
-     * Prepare and submit to PayU.
-     */
     public function store(Request $request)
     {
-        // Validate required checkout fields (mirror other gateways)
-        $request->validate([
-            'state_id' => '' // adjust according to your store rules
-        ]);
+        // Validate minimal inputs (your checkout validation may be richer)
+        $request->validate([]);
 
         $paymentData = PaymentSetting::where('unique_keyword', 'payu')->first();
         if (!$paymentData || $paymentData->status != 1) {
@@ -37,47 +26,41 @@ class PayuController extends Controller
         }
 
         $paydata = $paymentData->convertJsonData();
-        // Defensive read of keys (support different admin field names)
+
+        // Accept a variety of field names from admin panel
         $key = $paydata['merchant_key'] ?? $paydata['key'] ?? $paydata['client_id'] ?? null;
-        $salt = $paydata['salt'] ?? $paydata['client_secret'] ?? $paydata['salt_key'] ?? null;
+        // support 'secret' (your DB has 'secret'), 'salt' and 'client_secret'
+        $salt = $paydata['salt'] ?? $paydata['client_secret'] ?? $paydata['secret'] ?? null;
         $mode = strtolower($paydata['mode'] ?? ($paydata['environment'] ?? 'sandbox'));
 
         if (empty($key) || empty($salt)) {
-            // Log the actual paydata for debugging (do not expose in UI)
             Log::error('PayU config missing or empty', [
                 'payment_setting_id' => $paymentData->id,
                 'information' => $paymentData->information,
                 'parsed' => $paydata
             ]);
-            // Provide a helpful UI message
             return redirect()->back()->with('error', __('PayU credentials are not configured properly. Please verify merchant key and salt in Payment Settings.'));
         }
 
         $action = $mode === 'live' ? 'https://secure.payu.in/_payment' : 'https://sandboxsecure.payu.in/_payment';
 
-        // Amount from cart helper
+        // Total amount calculation — use your existing price helper (adjust if needed)
         $amount = PriceHelper::cartTotal(Session::get('cart'));
         $amount = number_format((float)$amount, 2, '.', '');
 
-        // User details
         $firstname = Auth::check() ? (Auth::user()->first_name ?: 'Customer') : ($request->input('firstname') ?: 'Customer');
         $email = Auth::check() ? (Auth::user()->email ?: 'customer@example.com') : ($request->input('email') ?: 'customer@example.com');
         $phone = Auth::check() ? (Auth::user()->phone ?: '') : ($request->input('phone') ?: '');
 
-        // Transaction id
         $txnid = 'OLWIX' . time() . Str::upper(Str::random(6));
-
         $productinfo = 'Order Payment';
 
-        // success & failure URLs
-        $surl = route('front.payu.notify');
+        $surl = route('front.payu.notify'); // success notify url (PayU will POST here)
         $furl = route('front.checkout.cancle');
 
-        // Save txn id in session for debugging/verification if needed
         Session::put('payu_txnid', $txnid);
 
-        // Compute hash according to PayU docs:
-        // hashString = key|txnid|amount|productinfo|firstname|email|||||||||||salt
+        // Hash for PayU (key|txnid|amount|productinfo|firstname|email|||||||||||salt)
         $hash_string = $key . '|' . $txnid . '|' . $amount . '|' . $productinfo . '|' . $firstname . '|' . $email . '|||||||||||' . $salt;
         $hash = strtolower(hash('sha512', $hash_string));
 
@@ -100,10 +83,9 @@ class PayuController extends Controller
 
     /**
      * PayU notify/response handler
-     * Verifies hash and redirects to success or cancel page.
-     * Important: Extend this to finalize order (create order entry / send emails) as per your existing checkout flow.
+     * Verifies hash and on success triggers referral/wallet processing
      */
-    public function notify(Request $request)
+    public function notify(Request $request, ReferralService $referralService)
     {
         $posted = $request->all();
         $paymentData = PaymentSetting::where('unique_keyword', 'payu')->first();
@@ -113,7 +95,7 @@ class PayuController extends Controller
         }
 
         $paydata = $paymentData->convertJsonData();
-        $salt = $paydata['salt'] ?? $paydata['client_secret'] ?? $paydata['salt_key'] ?? null;
+        $salt = $paydata['salt'] ?? $paydata['client_secret'] ?? $paydata['secret'] ?? null;
         $key = $paydata['merchant_key'] ?? $paydata['key'] ?? $paydata['client_id'] ?? null;
 
         if (empty($salt) || empty($key)) {
@@ -134,7 +116,7 @@ class PayuController extends Controller
             return redirect()->route('front.checkout.cancle')->with('error', __('Payment verification failed.'));
         }
 
-        // Recompute hash
+        // Recompute hash the PayU way
         if (isset($posted['additionalCharges'])) {
             $hash_seq = $posted['additionalCharges'] . '|' . $salt . '|' . $status . '|||||||||||' . $email . '|' . $firstname . '|' . $productinfo . '|' . $amount . '|' . $txnid . '|' . $key;
         } else {
@@ -154,9 +136,30 @@ class PayuController extends Controller
 
         // Payment verified
         if (strtolower($status) === 'success') {
-            // TODO: Finalize order here: create Order record or mark existing order paid (use your CheckoutController logic).
-            Session::put('payu_response', $posted);
-            return redirect()->route('front.checkout.success')->with('success', __('Payment successful.'));
+            // Find order by txnid or transaction_number whichever you store earlier
+            $order = Order::where('txnid', $txnid)->orWhere('transaction_number', $txnid)->first();
+
+            // If your order was created earlier with a different txnid storage, adjust lookup accordingly.
+            if ($order) {
+                $order->payment_status = 'Completed';
+                $order->payment_method = 'PayU';
+                $order->order_status = 'Processing';
+                $order->save();
+
+                // Process referral/cashback/wallet credit
+                try {
+                    $referralService->processReferralForOrder($order);
+                } catch (\Exception $e) {
+                    Log::error('ReferralService failed: ' . $e->getMessage(), ['order_id' => $order->id]);
+                }
+
+                // redirect to success page in your app
+                return redirect()->route('front.checkout.success')->with('success', __('Payment successful.'));
+            }
+
+            // If order not found, you might want to log and/or create a transaction record
+            Log::warning('PayU notify: payment success but order not found', ['posted' => $posted]);
+            return redirect()->route('front.checkout.cancle')->with('error', __('Payment processed but order not found.'));
         }
 
         return redirect()->route('front.checkout.cancle')->with('error', __('Payment failed or cancelled.'));

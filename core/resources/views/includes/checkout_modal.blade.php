@@ -257,6 +257,35 @@
   </form>
     </div>
 
+    <!-- PAYU Modal -->
+<div class="modal fade" id="payu" tabindex="-1" aria-hidden="true">
+  <form class="interactive-credit-card row" action="{{ route('front.payu.submit') }}" method="POST">
+    @csrf
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h6 class="modal-title">{{ __('Transactions via PayU') }}</h6>
+          <button class="close" type="button" data-bs-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <div class="card-body">
+            <p>{{ PriceHelper::GatewayText('payu') }}</p>
+          </div>
+        </div>
+
+        <input type="hidden" name="payment_method" value="PayU">
+        <input type="hidden" name="shipping_id" value="" class="shipping_id_setup">
+        <input type="hidden" name="state_id" value="{{ auth()->check() && auth()->user()->state_id ? auth()->user()->state_id : '' }}" class="state_id_setup">
+
+        <div class="modal-footer">
+          <button class="btn btn-primary btn-sm" type="button" data-bs-dismiss="modal"><span>{{ __('Cancel') }}</span></button>
+          <button class="btn btn-primary btn-sm" type="submit"><span>{{ __('Checkout With PayU') }}</span></button>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+
     {{-- SSL COMMERZ --}}
     <div class="modal fade" id="sslcommerz" tabindex="-1"  aria-hidden="true">
       <form class="interactive-credit-card row" action="{{route('front.sslcommerz.submit')}}" method="POST">

@@ -432,6 +432,9 @@ Route::group(['middleware' => 'maintainance'], function () {
         Route::post('/paytm/submit', 'Payment\PaytmController@store')->name('front.paytm.submit');
         Route::post('/razorpay/notify', 'Payment\RazorpayController@notify')->name('front.razorpay.notify');
         Route::post('/razorpay/submit', 'Payment\RazorpayController@store')->name('front.razorpay.submit');
+        // PayU routes
+        Route::post('/payu/submit', 'Payment\PayuController@store')->name('front.payu.submit');
+        Route::post('/payu/notify', 'Payment\PayuController@notify')->name('front.payu.notify');
         Route::post('/flutterwave/notify', 'Payment\FlutterwaveController@notify')->name('front.flutterwave.notify');
         Route::post('/flutterwave/submit', 'Payment\FlutterwaveController@store')->name('front.flutterwave.submit');
         Route::post('/mercadopago/submit', 'Payment\MercadopagoController@store')->name('front.mercadopago.submit');

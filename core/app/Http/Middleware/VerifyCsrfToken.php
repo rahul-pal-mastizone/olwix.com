@@ -12,10 +12,14 @@ class VerifyCsrfToken extends Middleware
      * @var array<int, string>
      */
     protected $except = [
+        
+        // existing exceptions...
         '/paytm/notify',
         '/sslcommerz/notify',
         'razorpay/notify',
         'flutterwave/notify',
-        '/admin/summernote/image/upload'
+        '/admin/summernote/image/upload',
+        // Add PayU notify endpoint so external PayU server posts are accepted
+        'payu/notify'
     ];
 }

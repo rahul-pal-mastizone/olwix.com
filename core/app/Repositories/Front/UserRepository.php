@@ -32,6 +32,17 @@ class UserRepository
 
         Notification::create(['user_id' => $user->id]);
 
+        // If a referral_code was provided, attach referrer (do not allow self-referral)
+        $referralCode = $request->input('referral_code');
+        if ($referralCode) {
+            $referrer = User::where('referral_code', $referralCode)->first();
+            if ($referrer && $referrer->id != $user->id) {
+                $user->referred_by = $referrer->id;
+                $user->save();
+            }
+        }
+
+
         $emailData = [
             'to' => $user->email,
             'type' => "Registration",

@@ -133,6 +133,12 @@
                             @endif
                             </div>
                         </div>
+                        {{-- Insert this where you show payment methods, e.g. just before the payment methods loop --}}
+                        <div class="form-group mb-3">
+                            <label for="referral_code">{{ __('Referral code (optional)') }}</label>
+                            <input type="text" name="referral_code" id="referral_code" class="form-control" value="{{ old('referral_code', Auth::check() ? Auth::user()->referral_code : '') }}" placeholder="{{ __('Enter referral code if you have one') }}">
+                            <small class="form-text text-muted">{{ __('If you have a referral code from someone else, enter it to give them referral credit.') }}</small>
+                        </div>
                         <h6 class="pb-2 widget-title2">{{ __('Pay With') }} :</h6>
                         <div class="row mt-4">
                             <div class="col-12">
@@ -179,3 +185,16 @@
         </div>
     </div>
 @endsection
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var referralInput = document.getElementById('referral_code');
+    var modalHiddenInputs = document.querySelectorAll('input[name="referral_code"][type="hidden"]');
+    if(referralInput){
+      referralInput.addEventListener('input', function(){
+        modalHiddenInputs.forEach(function(h){
+          h.value = referralInput.value;
+        });
+      });
+    }
+  });
+</script>

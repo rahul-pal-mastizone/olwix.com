@@ -125,6 +125,14 @@
                 </div>
               </div>
 
+              <!-- NEW: Referral code input -->
+              <div class="col-12 form-group">
+                <label for="referral_code">{{ __('Referral code (optional)') }}</label>
+                <input id="referral_code" type="text" class="form-control" name="referral_code" value="{{ old('referral_code') }}" placeholder="{{ __('If someone referred you, enter their code') }}">
+                <small class="form-text text-muted">{{ __('Referral code is optional. If valid, you will receive referral credit.') }}</small>
+              </div>
+
+
               @if ($setting->recaptcha == 1)
               <div class="col-lg-12 mb-4">
                   {!! NoCaptcha::renderJs() !!}

@@ -26,9 +26,9 @@ class User extends Authenticatable
         'bill_city',
         'bill_country',
         'bill_company',
-        'state_id'
-
-
+        'state_id',
+        'referral_code',
+        'referred_by'
     ];
 
 
@@ -81,9 +81,6 @@ class User extends Authenticatable
         return $this->first_name.' '.$this->last_name;
     }
 
-
-
-
     public function wishlistCount()
     {
         return $this->wishlists()->whereHas('item', function($query) {
@@ -91,4 +88,35 @@ class User extends Authenticatable
                 })->count();
     }
 
+    // Wallet relationship
+    public function wallet()
+    {
+        return $this->hasOne(\App\Models\Wallet::class, 'user_id');
+    }
+
+    // Referrer relationship
+    public function referrer()
+    {
+        return $this->belongsTo(User::class, 'referred_by')->withDefault();
+    }
+
+    /**
+     * Booted: create referral_code and wallet when a user is created
+     */
+    protected static function booted()
+    {
+        static::created(function ($user) {
+            // create referral code if not present
+            if (!$user->referral_code) {
+                $code = 'U' . strtoupper(substr(md5($user->id . time()), 0, 8));
+                $user->referral_code = $code;
+                $user->save();
+            }
+
+            // create wallet record if not present
+            if (!$user->wallet) {
+                \App\Models\Wallet::create(['user_id' => $user->id, 'balance' => 0]);
+            }
+        });
+    }
 }

@@ -13,6 +13,27 @@
                     <li><a href="{{ route('front.index')}}">{{__('Home')}}</a> </li>
                     <li class="separator"></li>
                     <li>{{__('Welcome Back')}}, {{$user->first_name}}</li>
+                              {{-- REFERRAL CODE DISPLAY --}}
+          <div class="mt-3">
+            <h6>{{ __('Your Referral Code') }}</h6>
+            @if($user->referral_code)
+              <div class="d-flex align-items-center">
+                <div class="me-3">
+                  <strong class="h5">{{ $user->referral_code }}</strong>
+                  <div class="small text-muted">{{ __('Give this code to others or share the link below') }}</div>
+                </div>
+                <div>
+                  <button class="btn btn-outline-secondary btn-sm" id="copyReferralBtn" data-clipboard-text="{{ url('/') }}?ref={{ $user->referral_code }}">{{ __('Copy link') }}</button>
+                </div>
+              </div>
+              <div class="mt-2">
+                <input id="referralLinkInput" class="form-control" readonly value="{{ url('/') }}?ref={{ $user->referral_code }}">
+              </div>
+            @else
+              <div class="text-muted">{{ __('No referral code found.') }}</div>
+            @endif
+          </div>
+          {{-- END REFERRAL --}}
                   </ul>
             </div>
         </div>
@@ -98,4 +119,23 @@
           </div>
         </div>
   </div>
+
+
+@push('scripts')
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    var copyBtn = document.getElementById('copyReferralBtn');
+    if(copyBtn){
+      copyBtn.addEventListener('click', function(e){
+        var text = this.getAttribute('data-clipboard-text');
+        navigator.clipboard.writeText(text).then(function(){
+          alert("{{ __('Referral link copied to clipboard') }}");
+        }).catch(function(){
+          alert("{{ __('Press Ctrl+C to copy') }}");
+        });
+      });
+    }
+  });
+</script>
+@endpush
 @endsection

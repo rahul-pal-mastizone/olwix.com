@@ -141,6 +141,35 @@ class PayuController extends Controller
 
         Session::put('payu_txnid', $txnid);
 
+        // store() : after Session::put('payu_txnid', $txnid);
+if (Session::has('appointment_id')) {
+    try {
+        $aptId = Session::get('appointment_id');
+        $apt = \App\Models\Appointment::find($aptId);
+        if ($apt) {
+            $apt->txnid = $txnid;
+            $apt->save();
+            Log::info('PayU store: linked txnid to appointment', ['appointment_id'=>$aptId, 'txnid'=>$txnid]);
+        }
+    } catch (\Throwable $e) {
+        Log::warning('PayU store: failed to link appointment txnid: '.$e->getMessage());
+    }
+}
+
+// If order not found, try appointment
+$appointment = \App\Models\Appointment::where('txnid', $txnid)->first();
+if ($appointment) {
+    $appointment->payment_status = 'paid';
+    $appointment->status = 'notified'; // or keep 'new' and handle notifications separately
+    $appointment->save();
+
+    // Optionally send email or notification to admin/pandit - you can dispatch a Job here.
+
+    Log::info('PayU notify: appointment payment marked paid', ['appointment_id'=>$appointment->id]);
+    // Redirect to appointment success page (shows thank you)
+    return redirect()->route('front.appointment.success', $appointment->id)->with('success', __('Payment successful. Appointment booked.'));
+}
+
         // Hash for PayU
         $hash_string = $key . '|' . $txnid . '|' . $amount . '|' . $productinfo . '|' . $firstname . '|' . $email . '|||||||||||' . $salt;
         $hash = strtolower(hash('sha512', $hash_string));

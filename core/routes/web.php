@@ -439,6 +439,28 @@ Route::group(['middleware' => 'maintainance'], function () {
         Route::post('/flutterwave/submit', 'Payment\FlutterwaveController@store')->name('front.flutterwave.submit');
         Route::post('/mercadopago/submit', 'Payment\MercadopagoController@store')->name('front.mercadopago.submit');
         Route::post('/authorize/submit', 'Payment\AuthorizeController@store')->name('front.authorize.submit');
+        // appointment routes
+        Route::get('/appointment/{type}', [\App\Http\Controllers\Front\AppointmentController::class, 'showForm'])->name('front.appointment.form');
+        Route::post('/appointment/submit', [\App\Http\Controllers\Front\AppointmentController::class, 'submit'])->name('front.appointment.submit');
+        Route::get('/appointment/success/{id}', [\App\Http\Controllers\Front\AppointmentController::class, 'success'])->name('front.appointment.success');
+        // Redirect old Panchang page to new appointment form
+        Route::get('/Panchang', function () {
+            return redirect('/appointment/pandit');
+        });
+
+        // Redirect old Quick Links to new appointment pages
+        Route::get('/Panchang', fn() => redirect('/appointment/pandit'));
+        Route::get('/Jyotish-Panchang', fn() => redirect('/appointment/pandit'));
+        Route::get('/Child-care', fn() => redirect('/appointment/pediatrician'));
+        Route::get('/Mother-care', fn() => redirect('/appointment/lady_doctor'));
+        Route::get('/Legal-support', fn() => redirect('/appointment/lawyer'));
+
+        // Route::get('/Child-care', function () {
+        //     return redirect('/appointment/child-care');
+        // });
+        // Route::get('/Panchang', function () {
+        //     return redirect('/appointment/pandit');
+        // });
 
         Route::post('/sslcommerz/notify', 'Payment\SslCommerzController@notify')->name('front.sslcommerz.notify');
         Route::post('/sslcommerz/submit', 'Payment\SslCommerzController@store')->name('front.sslcommerz.submit');

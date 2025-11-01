@@ -17,7 +17,6 @@ class PayuController extends Controller
 {
     public function store(Request $request)
     {
-        // Validate minimal inputs (your checkout validation may be richer)
         $request->validate([]);
 
         $paymentData = PaymentSetting::where('unique_keyword', 'payu')->first();
@@ -27,9 +26,7 @@ class PayuController extends Controller
 
         $paydata = $paymentData->convertJsonData();
 
-        // Accept a variety of field names from admin panel
         $key = $paydata['merchant_key'] ?? $paydata['key'] ?? $paydata['client_id'] ?? null;
-        // support 'secret' (your DB has 'secret'), 'salt' and 'client_secret'
         $salt = $paydata['salt'] ?? $paydata['client_secret'] ?? $paydata['secret'] ?? null;
         $mode = strtolower($paydata['mode'] ?? ($paydata['environment'] ?? 'sandbox'));
 
@@ -42,10 +39,94 @@ class PayuController extends Controller
             return redirect()->back()->with('error', __('PayU credentials are not configured properly. Please verify merchant key and salt in Payment Settings.'));
         }
 
-        $action = $mode === 'live' ? 'https://secure.payu.in/_payment' : 'https://sandboxsecure.payu.in/_payment';
+        // Use live endpoint when mode is 'live', otherwise sandbox
+        $action = $mode !== 'live' ? 'https://secure.payu.in/_payment' : 'https://sandboxsecure.payu.in/_payment';
 
-        // Total amount calculation — use your existing price helper (adjust if needed)
-        $amount = PriceHelper::cartTotal(Session::get('cart'));
+        // Local helper to sanitize amount strings (remove commas, currency symbols, etc.)
+        $sanitizeAmount = function ($raw) {
+            if ($raw === null) return null;
+            // Convert to string, remove common thousands separators and non-numeric except dot
+            $s = (string)$raw;
+            // Replace commas (thousands separator used by PriceHelper) and any non-digit/dot characters
+            $s = str_replace(',', '', $s);
+            $s = preg_replace('/[^\d\.]/', '', $s);
+            // Remove multiple dots if any (keep first)
+            if (substr_count($s, '.') > 1) {
+                $parts = explode('.', $s);
+                $s = array_shift($parts) . '.' . implode('', $parts);
+            }
+            if ($s === '') return null;
+            return (float)$s;
+        };
+
+        // Determine amount: check session keys, check Order in session, fallback to PriceHelper
+        $amount = null;
+
+        // Common session keys that other parts of checkout may set
+        $possibleSessionKeys = [
+            'payable_amount', 'grand_total', 'total_amount', 'order_amount', 'order_total', 'payment_amount', 'amount'
+        ];
+
+        foreach ($possibleSessionKeys as $k) {
+            if (Session::has($k)) {
+                $raw = Session::get($k);
+                $san = $sanitizeAmount($raw);
+                if ($san !== null) {
+                    $amount = $san;
+                    Log::info('PayU Payment: Amount taken from session key', ['key' => $k, 'raw' => $raw, 'sanitized' => $san]);
+                    break;
+                }
+            }
+        }
+
+        // If not found, try an existing order in session
+        if (empty($amount) && Session::has('order_id')) {
+            try {
+                $orderId = Session::get('order_id');
+                $order = Order::find($orderId);
+                if ($order) {
+                    // try common numeric fields on order; pick first non-null
+                    $candidates = [
+                        $order->payable_amount ?? null,
+                        $order->total ?? null,
+                        $order->grand_total ?? null,
+                        $order->amount ?? null,
+                    ];
+                    foreach ($candidates as $c) {
+                        $san = $sanitizeAmount($c);
+                        if ($san !== null) {
+                            $amount = $san;
+                            Log::info('PayU Payment: Amount taken from existing order', ['order_id' => $orderId, 'raw' => $c, 'sanitized' => $san]);
+                            break;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('PayU store: failed to load order from session: ' . $e->getMessage(), ['order_id' => Session::get('order_id')]);
+            }
+        }
+
+        // Fallback to cart total
+        if (empty($amount)) {
+            $raw = PriceHelper::cartTotal(Session::get('cart'));
+            Log::info('PayU Amount from PriceHelper', ['amount_raw' => $raw]);
+            $san = $sanitizeAmount($raw);
+            if ($san !== null) {
+                $amount = $san;
+            }
+        }
+
+        // Final sanity check and format for PayU
+        if ($amount === null || !is_numeric($amount) || $amount <= 0) {
+            Log::warning('PayU store: computed payment amount is invalid', [
+                'amount_final' => $amount,
+                'session_keys' => array_intersect_key(Session::all(), array_flip($possibleSessionKeys)),
+                'cart' => Session::get('cart'),
+            ]);
+            return redirect()->back()->with('error', __('Invalid payment amount.'));
+        }
+
+        // Format with two decimals
         $amount = number_format((float)$amount, 2, '.', '');
 
         $firstname = Auth::check() ? (Auth::user()->first_name ?: 'Customer') : ($request->input('firstname') ?: 'Customer');
@@ -55,12 +136,12 @@ class PayuController extends Controller
         $txnid = 'OLWIX' . time() . Str::upper(Str::random(6));
         $productinfo = 'Order Payment';
 
-        $surl = route('front.payu.notify'); // success notify url (PayU will POST here)
+        $surl = route('front.payu.notify');
         $furl = route('front.checkout.cancle');
 
         Session::put('payu_txnid', $txnid);
 
-        // Hash for PayU (key|txnid|amount|productinfo|firstname|email|||||||||||salt)
+        // Hash for PayU
         $hash_string = $key . '|' . $txnid . '|' . $amount . '|' . $productinfo . '|' . $firstname . '|' . $email . '|||||||||||' . $salt;
         $hash = strtolower(hash('sha512', $hash_string));
 
@@ -78,12 +159,18 @@ class PayuController extends Controller
             'hash' => $hash,
         ];
 
+        Log::info('PayU store prepared', [
+            'txnid' => $txnid,
+            'amount' => $amount,
+            'amount_raw_logged' => isset($raw) ? $raw : null,
+            'action' => $action
+        ]);
+
         return view('payment.payu.submit', compact('data'));
     }
 
     /**
      * PayU notify/response handler
-     * Verifies hash and on success triggers referral/wallet processing
      */
     public function notify(Request $request, ReferralService $referralService)
     {
@@ -116,7 +203,6 @@ class PayuController extends Controller
             return redirect()->route('front.checkout.cancle')->with('error', __('Payment verification failed.'));
         }
 
-        // Recompute hash the PayU way
         if (isset($posted['additionalCharges'])) {
             $hash_seq = $posted['additionalCharges'] . '|' . $salt . '|' . $status . '|||||||||||' . $email . '|' . $firstname . '|' . $productinfo . '|' . $amount . '|' . $txnid . '|' . $key;
         } else {
@@ -134,30 +220,23 @@ class PayuController extends Controller
             return redirect()->route('front.checkout.cancle')->with('error', __('Payment verification failed.'));
         }
 
-        // Payment verified
         if (strtolower($status) === 'success') {
-            // Find order by txnid or transaction_number whichever you store earlier
             $order = Order::where('txnid', $txnid)->orWhere('transaction_number', $txnid)->first();
-
-            // If your order was created earlier with a different txnid storage, adjust lookup accordingly.
             if ($order) {
                 $order->payment_status = 'Completed';
                 $order->payment_method = 'PayU';
                 $order->order_status = 'Processing';
                 $order->save();
 
-                // Process referral/cashback/wallet credit
                 try {
                     $referralService->processReferralForOrder($order);
                 } catch (\Exception $e) {
                     Log::error('ReferralService failed: ' . $e->getMessage(), ['order_id' => $order->id]);
                 }
 
-                // redirect to success page in your app
                 return redirect()->route('front.checkout.success')->with('success', __('Payment successful.'));
             }
 
-            // If order not found, you might want to log and/or create a transaction record
             Log::warning('PayU notify: payment success but order not found', ['posted' => $posted]);
             return redirect()->route('front.checkout.cancle')->with('error', __('Payment processed but order not found.'));
         }
